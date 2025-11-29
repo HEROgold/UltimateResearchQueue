@@ -1,17 +1,19 @@
 {
-  "name": "UltimateResearchQueue2",
-  "version": "2.0.2",
-  "title": "Ultimate Research Queue for 2.x",
-  "description": "Queue technologies for research, see research time ETAs, automatically research all prerequisites, auto-research infinite technologies.",
-  "author": "brendanmeyer",
+  "name": "heroic-research-queue",
+  "version": "1.0.0",
+  "title": "Heroic Research Queue",
+  "description": "Fork of Ultimate Research Queue (2). Fixing bugs and adding QoL features. Larger tech queue, better trigger-tech handling",
+  "author": "HEROgold",
   "contact": "https://github.com/brendanmeyer/UltimateResearchQueue",
   "homepage": "https://github.com/brendanmeyer/UltimateResearchQueue",
   "factorio_version": "2.0",
   "dependencies": [
     "base >= 2.0.28",
     "flib >= 0.16.1",
-    "? RecipeBook",
+    "! RecipeBook",
     "! sonaxaton-research-queue",
-    "! UltimateResearchQueue"
+    "! UltimateResearchQueue",
+    "! UltimateResearchQueue2",
+    "! AutoSwitchTechs"
   ]
 }

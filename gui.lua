@@ -50,9 +50,7 @@ local gui = {}
 --- @param self Gui
 function gui.cancel_selected_research(self)
   local selected = self.state.selected
-  if not selected then
-    return
-  end
+  if not selected then return end
   research_queue.remove(self.force_table.queue, selected.technology, selected.level)
   util.schedule_force_update(self.force)
 end
@@ -66,9 +64,7 @@ end
 --- @param player_index uint
 function gui.destroy(player_index)
   local self = storage.guis[player_index]
-  if not self then
-    return
-  end
+  if not self then return end
   if self.elems.urq_window.valid then
     self.elems.urq_window.destroy()
   end
@@ -126,9 +122,7 @@ end
 
 --- @param self Gui
 function gui.hide(self)
-  if self.state.opening_graph then
-    return
-  end
+  if self.state.opening_graph then return end
   if self.player.opened_gui_type == defines.gui_type.custom and self.player.opened == self.elems.urq_window then
     self.player.opened = nil
   end
@@ -139,9 +133,7 @@ end
 --- @return Gui?
 function gui.new(player)
   gui.destroy(player.index)
-  if not player.valid then
-    return
-  end
+  if not player.valid then return end
 
   --- @type GuiElems
   local elems = flib_gui.add(player.gui.screen, gui.base_template)
@@ -189,9 +181,7 @@ end
 --- @param e EventData.on_gui_click
 function gui.on_start_research_click(self, e)
   local selected = self.state.selected
-  if not selected then
-    return
-  end
+  if not selected then return end
   gui.start_research(self, selected.technology, selected.level, e.shift, e.control and util.is_cheating(self.player))
 end
 
@@ -205,17 +195,11 @@ function gui.on_tech_slot_click(self, e)
   local technology = self.force.technologies[tech_name]
   if e.button == defines.mouse_button_type.right then
     research_queue.remove(self.force_table.queue, technology, level)
-    util.schedule_force_update(self.force)
-    return
-  end
+    util.schedule_force_update(self.force) return end
   if script.active_mods["RecipeBook"] and e.alt then
-    remote.call("RecipeBook", "open_page", self.player.index, "technology", tech_name)
-    return
-  end
+    remote.call("RecipeBook", "open_page", self.player.index, "technology", tech_name) return end
   if gui_util.is_double_click(e.element) then
-    gui.start_research(self, technology, level, e.shift, e.control and util.is_cheating(self.player))
-    return
-  end
+    gui.start_research(self, technology, level, e.shift, e.control and util.is_cheating(self.player)) return end
   gui.select_technology(self, technology, level)
 end
 
@@ -229,14 +213,10 @@ end
 
 --- @param self Gui
 function gui.on_window_closed(self)
-  if self.state.pinned then
-    return
-  end
+  if self.state.pinned then return end
   if self.state.search_open then
     gui.toggle_search(self)
-    self.player.opened = self.elems.urq_window
-    return
-  end
+    self.player.opened = self.elems.urq_window return end
   gui.hide(self)
 end
 
@@ -256,13 +236,9 @@ end
 --- @param self Gui
 --- @param e EventData.on_gui_click
 function gui.open_in_recipe_book(self, e)
-  if not script.active_mods["RecipeBook"] or not e.alt then
-    return
-  end
+  if not script.active_mods["RecipeBook"] or not e.alt then return end
   local class, name = string.match(e.element.sprite, "(.*)/(.*)")
-  if class ~= "item" and class ~= "recipe" then
-    return
-  end
+  if class ~= "item" and class ~= "recipe" then return end
   remote.call("RecipeBook", "open_page", self.player.index, class, name)
 end
 
@@ -274,9 +250,7 @@ function gui.select_technology(self, technology, level)
     level = technology.level
   end
   local former_selected = self.state.selected
-  if former_selected and former_selected.technology == technology and former_selected.level == level then
-    return
-  end
+  if former_selected and former_selected.technology == technology and former_selected.level == level then return end
   self.state.selected = { technology = technology, level = level }
 
   gui.update_queue(self)
@@ -315,14 +289,12 @@ function gui.start_research(self, technology, level, to_front, instant_research)
   if instant_research then
     push_error = research_queue.instant_research(self.force_table.queue, technology)
   elseif to_front then
-    push_error = research_queue.push_front(self.force_table.queue, technology, level)
+    push_error = research_queue.push_front(self.force_table.queue, technology, level, self.player.index)
   else
-    push_error = research_queue.push(self.force_table.queue, technology, level)
+    push_error = research_queue.push(self.force_table.queue, technology, level, self.player.index)
   end
   if push_error then
-    util.flying_text(self.player, push_error)
-    return
-  end
+    util.flying_text(self.player, push_error) return end
   util.schedule_force_update(self.force)
 end
 
@@ -382,9 +354,7 @@ end
 --- @param self Gui
 function gui.unresearch(self)
   local selected = self.state.selected
-  if not selected then
-    return
-  end
+  if not selected then return end
   research_queue.unresearch(self.force_table.queue, selected.technology)
 end
 
@@ -537,9 +507,7 @@ end
 --- @param self Gui
 function gui.update_tech_info(self)
   local selected = self.state.selected
-  if not selected then
-    return
-  end
+  if not selected then return end
   local technology, level = selected.technology, selected.level
 
   local show_controls = self.player.mod_settings["urq-show-control-hints"].value --[[@as boolean]]
@@ -576,26 +544,70 @@ function gui.update_tech_info(self)
   -- Ingredients
   local ingredients_table = self.elems.tech_info_ingredients_table
   ingredients_table.clear()
-  local ingredients_children = table.map(technology.research_unit_ingredients, function(ingredient)
-    return {
+  local ingredients_children = nil
+  local researchTrigger = technology.prototype.research_trigger
+  if #technology.research_unit_ingredients > 0 then
+    ingredients_children = table.map(technology.research_unit_ingredients, function(ingredient)
+      return {
+        type = "sprite-button",
+        style = "transparent_slot",
+        sprite = "item/" .. ingredient.name,
+        number = ingredient.amount,
+        elem_tooltip = { type = "item", name = ingredient.name },
+        tooltip = show_controls and script.active_mods["RecipeBook"] and { "gui.urq-tooltip-view-in-recipe-book" },
+        handler = { [defines.events.on_gui_click] = gui.open_in_recipe_book },
+      }
+    end)
+
+    flib_gui.add(ingredients_table, ingredients_children)
+    flib_gui.add(ingredients_table, {
+      type = "label",
+      style = "count_label",
+      caption = "[img=quantity-time] " .. format.number(math.round(technology.research_unit_energy / 60, 0.01), true),
+    })
+
+    local research_unit_count = flib_technology.get_research_unit_count(technology, level)
+    self.elems.tech_info_ingredients_count_label.caption = "[img=quantity-multiplier] "
+        .. format.number(research_unit_count, research_unit_count > 9999)
+  elseif researchTrigger ~= nil then
+    local base = nil
+    local name = nil
+    local number = 1
+    local label = { "technology-trigger." .. researchTrigger.type }
+    if researchTrigger.type == "mine-entity" then
+      base = "entity"
+      name = researchTrigger.entity
+    elseif researchTrigger.type == "build-entity" then
+      base = "entity"
+      name = researchTrigger.entity.name
+    elseif researchTrigger.type == "capture-spawner" then
+      base = "technology"
+      name = technology.name
+    elseif researchTrigger.type == "create-space-platform" then
+      base = "technology"
+      name = technology.name
+    else
+      number = researchTrigger.count
+      base = "item"
+      name = researchTrigger.item.name
+    end
+
+    flib_gui.add(ingredients_table, {
+      type = "label",
+      style = "label",
+      caption = label,
+    })
+    flib_gui.add(ingredients_table, {
       type = "sprite-button",
       style = "transparent_slot",
-      sprite = "item/" .. ingredient.name,
-      number = ingredient.amount,
-      elem_tooltip = { type = "item", name = ingredient.name },
+      sprite = base .. "/" .. name,
+      number = number,
+      elem_tooltip = { type = base, name = name },
       tooltip = show_controls and script.active_mods["RecipeBook"] and { "gui.urq-tooltip-view-in-recipe-book" },
       handler = { [defines.events.on_gui_click] = gui.open_in_recipe_book },
-    }
-  end)
-  flib_gui.add(ingredients_table, ingredients_children)
-  flib_gui.add(ingredients_table, {
-    type = "label",
-    style = "count_label",
-    caption = "[img=quantity-time] " .. format.number(math.round(technology.research_unit_energy / 60, 0.01), true),
-  })
-  local research_unit_count = flib_technology.get_research_unit_count(technology, level)
-  self.elems.tech_info_ingredients_count_label.caption = "[img=quantity-multiplier] "
-      .. format.number(research_unit_count, research_unit_count > 9999)
+    })
+    self.elems.tech_info_ingredients_count_label.caption = ""
+  end
 
   -- Effects
   local effects_table = self.elems.tech_info_effects_table
@@ -604,7 +616,9 @@ function gui.update_tech_info(self)
     effects_table,
     table.map(technology.prototype.effects, function(effect)
       local template = gui_util.effect_button(effect, show_controls)
-      template.handler = { [defines.events.on_gui_click] = gui.open_in_recipe_book }
+      if template ~= nil then
+        template.handler = { [defines.events.on_gui_click] = gui.open_in_recipe_book }
+      end
       return template
     end)
   )
@@ -652,9 +666,7 @@ end
 --- @param progress_only boolean?
 function gui.update_tech_info_footer(self, progress_only)
   local selected = self.state.selected
-  if not selected then
-    return
-  end
+  if not selected then return end
   local technology, level = selected.technology, selected.level
   local research_state = self.force_table.research_states[technology.name]
   local selected_name = flib_technology.get_leveled_name(technology, level)

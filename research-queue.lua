@@ -1,3 +1,4 @@
+---@diagnostic disable: cast-local-type
 local format = require("__flib__.format")
 local math = require("__flib__.math")
 local flib_technology = require("__flib__.technology")
@@ -11,6 +12,7 @@ local util = require("util")
 --- @field duration string
 --- @field key string
 --- @field next ResearchQueueNode?
+--- @field prev ResearchQueueNode?
 
 --- @class TechnologyAndLevel
 --- @field technology LuaTechnology
@@ -31,9 +33,11 @@ local research_queue = {}
 
 --- @param self ResearchQueue
 function research_queue.clear(self)
-  while self.head do
-    research_queue.remove(self, self.head.technology, self.head.level)
-  end
+  self.head = nil
+  self.len = 0
+  self.lookup = {}
+  -- Single GUI update
+  util.schedule_force_update(self.force)
 end
 
 --- @param self ResearchQueue
@@ -50,8 +54,8 @@ function research_queue.contains(self, technology, level)
     -- This level
     return not not self.lookup[base_name .. "-" .. level]
   elseif level and technology.prototype.max_level ~= math.max_uint then
-    local base_key = base_name .. "-"
     -- All levels
+    local base_key = base_name .. "-"
     for i = technology.level, technology.prototype.max_level do
       if not self.lookup[base_key .. i] then
         return false
@@ -73,36 +77,47 @@ end
 --- @param technology LuaTechnology
 --- @return uint
 function research_queue.get_highest_level(self, technology)
-  local node = self.head
+  if not flib_technology.is_multilevel(technology) then
+    return self.lookup[technology.name] and technology.level or 0
+  end
+  
+  local base_name = flib_technology.get_base_name(technology)
   local highest = 0
-  while node do
-    if node.technology == technology then
-      highest = math.max(node.level, highest)
+  for key in pairs(self.lookup) do
+    if string.find(key, base_name .. "-", 1, true) == 1 then
+      local level = tonumber(string.match(key, base_name .. "%-(%d+)"))
+      if level then
+        highest = math.max(level, highest)
+      end
     end
-    node = node.next
   end
   return highest
 end
 
+--- @param self ResearchQueue
 --- @param technology LuaTechnology
-local function are_prereqs_satisfied(technology)
+--- @return ResearchState | nil
+function get_satisfaction_state(self, technology)
+  -- Check prerequisites once and determine state based on results
+  local all_satisfied = true
+  local all_satisfied_or_queued = true
+  
   for _, prerequisite in pairs(technology.prerequisites) do
     if not prerequisite.researched then
-      return false
+      all_satisfied = false
+      if not research_queue.contains(self, prerequisite, true) then
+        all_satisfied_or_queued = false
+        break -- No need to check further if we already know it's not available
+      end
     end
   end
-  return true
-end
-
---- @param technology LuaTechnology
---- @param queue ResearchQueue
-local function are_prereqs_satisfied_or_queued(technology, queue)
-  for _, prerequisite in pairs(technology.prerequisites) do
-    if not prerequisite.researched and not research_queue.contains(queue, prerequisite, true) then
-      return false
-    end
+  
+  if all_satisfied_or_queued then
+    return constants.research_state.conditionally_available
   end
-  return true
+  if all_satisfied then
+    return constants.research_state.available
+  end
 end
 
 --- @param self ResearchQueue
@@ -115,13 +130,52 @@ function research_queue.get_research_state(self, technology)
   if technology.prototype.hidden or not technology.enabled then
     return constants.research_state.disabled
   end
-  if are_prereqs_satisfied(technology) then
-    return constants.research_state.available
+  local state = get_satisfaction_state(self, technology)
+  return state or constants.research_state.not_available
+end
+
+
+--- Append a node to the front of the linked list.
+--- @param self ResearchQueue
+--- @param node ResearchQueueNode
+local function append_to_front(self, node)
+  node.prev = nil
+  node.next = self.head
+  if self.head then
+    self.head.prev = node
   end
-  if are_prereqs_satisfied_or_queued(technology, self) then
-    return constants.research_state.conditionally_available
+  self.head = node
+end
+
+--- @param self ResearchQueue
+--- @param new_node ResearchQueueNode
+--- @param index integer
+local function insert_at_index(self, new_node, index)
+    -- Insert at index
+    local node = self.head
+    while node and node.next and index > 2 do
+      index = index - 1
+      node = node.next
+    end
+    -- This shouldn't ever fail...
+    if node then
+      new_node.next = node.next
+      new_node.prev = node
+      node.next = new_node
+    end
+end
+
+--- @param self ResearchQueue
+--- @param new_node ResearchQueueNode
+local function append_to_end(self, new_node)
+
+  local node = self.head
+  while node and node.next do
+    node = node.next
   end
-  return constants.research_state.not_available
+  -- This shouldn't ever fail...
+  node.next = new_node
+  new_node.prev = node
 end
 
 --- Add a technology and its prerequisites to the queue.
@@ -133,35 +187,25 @@ end
 local function push(self, technology, level, index)
   -- Update flag and length
   self.len = self.len + 1
-  -- Add to linked list
   local key = flib_technology.get_leveled_name(technology, level)
-  --- @type ResearchQueueNode
-  local new_node = { technology = technology, level = level, duration = "[img=infinity]", key = key }
-  self.lookup[key] = new_node
-  if not self.head or index == 1 then
-    new_node.next = self.head
-    self.head = new_node
-  elseif index then
-    local node = self.head
-    while node and node.next and index > 2 do
-      index = index - 1
-      node = node.next
-    end
-    -- This shouldn't ever fail...
-    if node then
-      new_node.next = node.next
-      node.next = new_node
-    end
-  else
-    local node = self.head
-    while node and node.next do
-      node = node.next
-    end
-    -- This shouldn't ever fail...
-    node.next = new_node
-  end
 
-  util.schedule_force_update(self.force)
+  --- @type ResearchQueueNode
+  local new_node = {
+    technology = technology,
+    level = level,
+    duration = "[img=infinity]",
+    key = key
+  }
+  self.lookup[key] = new_node
+
+  -- Add to linked list
+  if not self.head or index == 1 then
+    append_to_front(self, new_node)
+  elseif index then
+    insert_at_index(self, new_node, index)
+  else
+    append_to_end(self, new_node)
+  end
 end
 
 --- @param self ResearchQueue
@@ -169,13 +213,10 @@ end
 --- @return LocalisedString?
 function research_queue.instant_research(self, technology)
   local research_state = self.force_table.research_states[technology.name]
-  if research_state == constants.research_state.researched then
-    return { "message.urq-already-researched" }
-  end
-  if research_state == constants.research_state.available then
-    technology.researched = true
-    return
-  end
+  if research_state == constants.research_state.researched then return { "message.urq-already-researched" } end
+  if research_state == constants.research_state.available then technology.researched = true; return end
+
+  -- Research prerequisites and then this technology
   local prerequisites = storage.technology_prerequisites[technology.name] or {}
   local technologies = self.force.technologies
   for i = 1, #prerequisites do
@@ -187,22 +228,70 @@ function research_queue.instant_research(self, technology)
   technology.researched = true
 end
 
+--- Remove a node from the linked list.
+--- @param self ResearchQueue
+--- @param node ResearchQueueNode
+local function remove_node(self, node)
+  if node.prev then
+    node.prev.next = node.next
+  else
+    -- This is the head node, update the head pointer
+    self.head = node.next
+  end
+  if node.next then
+    node.next.prev = node.prev
+  end
+  self.lookup[node.key] = nil
+  self.len = self.len - 1
+  return node
+end
+
+--- Find a node in the linked list.
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+--- @return ResearchQueueNode?
+local function find_node(self, technology, level)
+  -- Find node from linked list
+  local node = self.head
+  while node and (node.technology ~= technology or node.level ~= level) do
+    node = node.next
+  end
+  return node
+end
+
+--- Move a node to the front of the linked list.
 --- This does not account for prerequisites
 --- @param self ResearchQueue
 --- @param technology LuaTechnology
 --- @param level uint
 function research_queue.move_to_front(self, technology, level)
-  local node, prev = self.head, nil
-  while node and (node.technology ~= technology or node.level ~= level) do
-    prev = node
-    node = node.next
+  local key = flib_technology.get_leveled_name(technology, level)
+  local node = self.lookup[key]
+  
+  if not node or node == self.head then
+    return -- Node doesn't exist or is already at front
   end
-  if not node or not prev then
-    return
+
+  node = remove_node(self, node)
+  append_to_front(self, node)
+end
+
+--- Move a node to the back of the linked list.
+--- This does not account for descendants
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+function move_to_back(self, technology, level)
+  local key = flib_technology.get_leveled_name(technology, level)
+  local node = self.lookup[key]
+  
+  if not node then
+    return -- Node doesn't exist
   end
-  prev.next = node.next
-  node.next = self.head
-  self.head = node
+
+  node = remove_node(self, node)
+  append_to_end(self, node)
 end
 
 --- @param force LuaForce
@@ -224,6 +313,7 @@ function research_queue.new(force, force_table)
   }
 end
 
+--- Add a technology to the queue. Adds all levels from current to `level` or max level.
 --- @param to_research TechnologyAndLevel[]
 --- @param technology LuaTechnology
 --- @param level uint?
@@ -239,98 +329,142 @@ local function add_technology(to_research, technology, level, queue)
   end
 end
 
---- Add a technology and its prerequisites to the queue.
+-- Mark all prerequisites to to_research using depth-first traversal (original approach), marking already queued techs to to_move
 --- @param self ResearchQueue
+--- @param to_research TechnologyAndLevel[]
 --- @param technology LuaTechnology
---- @param level uint
+--- @param to_move TechnologyAndLevel[]
 --- @return LocalisedString?
-function research_queue.push(self, technology, level)
-  local research_state = self.force_table.research_states[technology.name]
-  if research_state == constants.research_state.researched then
-    return { "message.urq-already-researched" }
-  elseif research_state == constants.research_state.disabled then
-    return { "message.urq-tech-is-disabled" }
-  elseif research_queue.contains(self, technology, level) then
-    return { "message.urq-already-in-queue" }
-  end
-  --- @type TechnologyAndLevel[]
-  local to_research = {}
-  if research_state == constants.research_state.not_available then
-    -- Add all prerequisites to research this technology ASAP
-    local technologies = self.force.technologies
-    local technology_prerequisites = storage.technology_prerequisites[technology.name] or {}
-    for i = 1, #technology_prerequisites do
-      local prerequisite_name = technology_prerequisites[i]
-      local prerequisite = technologies[prerequisite_name]
-      local prerequisite_research_state = self.force_table.research_states[prerequisite_name]
-      if prerequisite_research_state == constants.research_state.disabled then
-        return { "message.urq-has-disabled-prerequisites" }
-      end
-      if
-          not research_queue.contains(self, prerequisite, true)
-          and prerequisite_research_state ~= constants.research_state.researched
-      then
-        add_technology(to_research, prerequisite)
-      end
-    end
-  end
-  add_technology(to_research, technology, level, self)
-  -- Check for errors
-  local num_to_research = #to_research
-  if num_to_research > constants.queue_limit then
-    return { "message.urq-too-many-unresearched-prerequisites" }
-  else
-    local len = self.len
-    -- It shouldn't ever be greater... right?
-    if len >= constants.queue_limit then
-      return { "message.urq-queue-is-full" }
-    elseif len + num_to_research > constants.queue_limit then
-      return { "message.urq-too-many-prerequisites-queue-full" }
-    end
-  end
-  for i = 1, #to_research do
-    local to_research = to_research[i]
-    push(self, to_research.technology, to_research.level)
-  end
-end
-
---- Add a technology and its prerequisites to the front of the queue, moving prerequisites if required.
---- @param self ResearchQueue
---- @param technology LuaTechnology
---- @param level uint
-function research_queue.push_front(self, technology, level)
-  local research_state = self.force_table.research_states[technology.name]
-  if research_state == constants.research_state.researched then
-    return { "message.urq-already-researched" }
-  elseif research_queue.contains(self, technology, level) then
-    -- TODO: Move to front of queue
-    return { "message.urq-already-in-queue" }
-  end
-  --- @type TechnologyAndLevel[]
-  local to_research = {}
-  --- @type TechnologyAndLevel[]
-  local to_move = {}
-  -- Add all prerequisites to research this technology ASAP
+local function add_prerequisites_depth_first(self, to_research, technology, to_move)
   local technologies = self.force.technologies
   local technology_prerequisites = storage.technology_prerequisites[technology.name] or {}
   for i = 1, #technology_prerequisites do
     local prerequisite_name = technology_prerequisites[i]
     local prerequisite = technologies[prerequisite_name]
     local prerequisite_research_state = self.force_table.research_states[prerequisite_name]
-    local in_queue = research_queue.contains(self, prerequisite, true)
-    if in_queue then
-      add_technology(to_move, prerequisite)
-    elseif prerequisite_research_state ~= constants.research_state.researched then
+    if prerequisite_research_state == constants.research_state.disabled then
+      return { "message.urq-has-disabled-prerequisites" }
+    end
+    if prerequisite.researched then
+      -- Already researched, skip
+      -- Might happen in modded runs
+      -- Where scripts control the research state.
+      goto continue
+    end
+
+    if
+        not research_queue.contains(self, prerequisite, true)
+        and prerequisite_research_state ~= constants.research_state.researched
+    then
       add_technology(to_research, prerequisite)
+    else
+      add_technology(to_move, prerequisite)
+    end
+    ::continue::
+  end
+end
+
+-- Mark all prerequisites to to_research using breadth-first traversal, marking already queued techs to to_move
+--- @param self ResearchQueue
+--- @param to_research TechnologyAndLevel[]
+--- @param technology LuaTechnology
+--- @param to_move TechnologyAndLevel[]
+--- @return LocalisedString?
+local function add_prerequisites_breadth_first(self, to_research, technology, to_move)
+  local technologies = self.force.technologies
+  local visited = {}
+  local queue = {technology}
+  local levels = {} -- Track the depth level of each technology for breadth-first ordering
+  levels[technology.name] = 0
+  local max_level = 0
+  
+  -- Breadth-first traversal of prerequisite tree
+  while #queue > 0 do
+    local current = table.remove(queue, 1) -- Remove from front (queue behavior)
+    local current_level = levels[current.name]
+    
+    -- Process immediate prerequisites of current technology
+    for _, prerequisite in pairs(current.prerequisites) do
+      if not visited[prerequisite.name] then
+        visited[prerequisite.name] = true
+        local prerequisite_level = current_level + 1
+        levels[prerequisite.name] = prerequisite_level
+        max_level = math.max(max_level, prerequisite_level)
+        
+        local prerequisite_research_state = self.force_table.research_states[prerequisite.name]
+        if prerequisite_research_state == constants.research_state.disabled then
+          return { "message.urq-has-disabled-prerequisites" }
+        end
+        
+        -- Add to queue for further processing if not researched
+        if prerequisite_research_state ~= constants.research_state.researched then
+          table.insert(queue, prerequisite)
+        end
+      end
     end
   end
-  -- Move higher levels of this tech forward
-  if flib_technology.is_multilevel(technology) and research_queue.contains(self, technology, true) then
-    local highest = research_queue.get_highest_level(self, technology)
-    add_technology(to_move, technology, highest)
+  
+  -- Sort prerequisites by level (breadth-first order) and add them
+  local prerequisites_by_level = {}
+  for tech_name, level in pairs(levels) do
+    if tech_name ~= technology.name then -- Exclude the original technology
+      if not prerequisites_by_level[level] then
+        prerequisites_by_level[level] = {}
+      end
+      table.insert(prerequisites_by_level[level], tech_name)
+    end
   end
-  add_technology(to_research, technology, level, self)
-  -- Check for errors
+  
+  -- Add prerequisites level by level, starting from the deepest (highest level) and working backwards
+  -- This ensures dependencies are added in the correct order for the queue
+  for level = max_level, 1, -1 do
+    local tech_names = prerequisites_by_level[level]
+    if tech_names then
+      for _, prerequisite_name in pairs(tech_names) do
+        local prerequisite = technologies[prerequisite_name]
+        local prerequisite_research_state = self.force_table.research_states[prerequisite_name]
+        
+        if prerequisite_research_state ~= constants.research_state.researched then
+          if not research_queue.contains(self, prerequisite, true) then
+            add_technology(to_research, prerequisite)
+          else
+            add_technology(to_move, prerequisite)
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Mark all prerequisites to to_research, choosing strategy based on player setting
+--- @param self ResearchQueue
+--- @param to_research TechnologyAndLevel[]
+--- @param technology LuaTechnology
+--- @param to_move TechnologyAndLevel[]
+--- @param player_index uint?
+--- @return LocalisedString?
+local function add_prerequisites(self, to_research, technology, to_move, player_index)
+  -- Default to depth-first if no player specified or setting not found
+  local use_breadth_first = false
+  
+  if player_index then
+    local player = game.get_player(player_index)
+    if player and player.valid then
+      --- @cast use_breadth_first boolean
+      use_breadth_first = player.mod_settings["urq-breadth-first-prerequisites"].value
+    end
+  end
+  
+  if use_breadth_first then
+    return add_prerequisites_breadth_first(self, to_research, technology, to_move)
+  else
+    return add_prerequisites_depth_first(self, to_research, technology, to_move)
+  end
+end
+
+--- @param self ResearchQueue
+--- @param to_research TechnologyAndLevel[]
+local function check_for_errors(self, to_research)
   local num_to_research = #to_research
   if num_to_research > constants.queue_limit then
     return { "message.urq-too-many-unresearched-prerequisites" }
@@ -343,50 +477,112 @@ function research_queue.push_front(self, technology, level)
       return { "message.urq-too-many-prerequisites-queue-full" }
     end
   end
+end
+
+--- Preprocess adding a technology and its prerequisites to the queue.
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+--- @param to_research TechnologyAndLevel[]
+--- @param player_index uint?
+--- @return LocalisedString?
+local function preprocess_push(self, technology, level, to_research, player_index)
+  local research_state = self.force_table.research_states[technology.name]
+  if research_state == constants.research_state.researched then
+    return { "message.urq-already-researched" }
+  elseif research_state == constants.research_state.disabled then
+    return { "message.urq-tech-is-disabled" }
+  elseif research_queue.contains(self, technology, level) then
+    local node = find_node(self, technology, level)
+    if not node then return { "message.urq-already-in-queue" } end
+    remove_node(self, node)
+    append_to_front(self, node)
+  end
+
+  if research_state == constants.research_state.not_available then
+    -- Store result, and return only if there was an error
+    local result = add_prerequisites(self, to_research, technology, {}, player_index) -- don't care about moving techs.
+    if result then return result end
+  end
+  add_technology(to_research, technology, level, self)
+
+  check_for_errors(self, to_research)
+end
+
+--- Push a technology and its prerequisites to the queue.
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+--- @param player_index uint?
+--- @return LocalisedString?
+function research_queue.push(self, technology, level, player_index)
+  --- @type TechnologyAndLevel[]
+  local to_research = {}
+
+  local result = preprocess_push(self, technology, level, to_research, player_index)
+  if result then return result end
+
+  -- Actually push to queue
+  for i = 1, #to_research do
+    local to_research = to_research[i]
+    push(self, to_research.technology, to_research.level)
+  end
+  util.schedule_force_update(self.force)
+end
+
+--- Add a technology and its prerequisites to the front of the queue, moving prerequisites if required.
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+--- @param player_index uint?
+function research_queue.push_front(self, technology, level, player_index)
+  -- pre-processing
+  local research_state = self.force_table.research_states[technology.name]
+  if research_state == constants.research_state.researched then
+    return { "message.urq-already-researched" }
+  elseif is_trigger_research(technology) then
+    return { "message.urq-unable-to-queue" }
+  elseif research_queue.contains(self, technology, level) then
+    research_queue.move_to_front(self, technology, level)
+  end
+
+  --- @type TechnologyAndLevel[]
+  local to_research = {}
+  --- @type TechnologyAndLevel[]
+  local to_move = {}
+
+  local result = add_prerequisites(self, to_research, technology, to_move, player_index)
+  if result then return result end
+
+  -- Move higher levels of this tech forward
+  if flib_technology.is_multilevel(technology) and research_queue.contains(self, technology, true) then
+    local highest = research_queue.get_highest_level(self, technology)
+    add_technology(to_move, technology, highest)
+  end
+  add_technology(to_research, technology, level, self)
+
+  check_for_errors(self, to_research)
+
+  -- Actually move techs to the front of the queue
   local num_to_move = #to_move
   for i = num_to_move, 1, -1 do
     local to_move = to_move[i]
     research_queue.move_to_front(self, to_move.technology, to_move.level)
   end
+
+  -- Actually add techs to the front of the queue
   for i = 1, #to_research do
     local to_research = to_research[i]
     push(self, to_research.technology, to_research.level, num_to_move + i)
   end
+  util.schedule_force_update(self.force)
 end
 
+--- Validate the queue after a removal.
+--- This removes descendants and higher levels of the same technology.
 --- @param self ResearchQueue
 --- @param technology LuaTechnology
---- @param level uint
---- @param skip_validation boolean?
---- @return boolean?
-function research_queue.remove(self, technology, level, skip_validation)
-  local key = flib_technology.get_leveled_name(technology, level)
-  if not self.lookup[key] then
-    return
-  end
-  -- Remove from linked list
-  local node, prev = self.head, nil
-  while node and (node.technology ~= technology or node.level ~= level) do
-    prev = node
-    node = node.next
-  end
-  if not node then
-    return
-  end
-  -- Remove node and decrement length
-  self.lookup[key] = nil
-  self.len = self.len - 1
-  if node == self.head then
-    self.head = node.next
-  else
-    prev.next = node.next
-  end
-
-  util.schedule_force_update(self.force)
-
-  if skip_validation then
-    return
-  end
+local function validate_queue(self, technology, level)
   -- Remove descendants
   local technologies = self.force.technologies
   local descendants = storage.technology_descendants[technology.name]
@@ -416,22 +612,40 @@ function research_queue.remove(self, technology, level, skip_validation)
 end
 
 --- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+--- @param skip_validation boolean?
+--- @return boolean?
+function research_queue.remove(self, technology, level, skip_validation)
+  local key = flib_technology.get_leveled_name(technology, level)
+  if not self.lookup[key] then return end
+
+  local node = find_node(self, technology, level)
+  if not node then return end
+
+  remove_node(self, node)
+
+  if skip_validation then return end
+  validate_queue(self, technology, level)
+  
+  -- Schedule GUI update after removal (only when not skipping validation)
+  util.schedule_force_update(self.force)
+end
+
+--- @param self ResearchQueue
 function research_queue.requeue_multilevel(self)
-  if not self.requeue_multilevel then
-    return
-  end
+  if not self.requeue_multilevel then return end
   local head = self.head
-  if not head then
-    return
-  end
+  if not head then return end
   local technology = head.technology
-  if not flib_technology.is_multilevel(technology) then
-    return
-  end
+  if not flib_technology.is_multilevel(technology) then return end
+
+  -- Find next level, and push it if it exists
   local next_level = research_queue.get_highest_level(self, technology) + 1
   if next_level > technology.prototype.max_level then
     return
   end
+  -- Note: No player_index here since this is automatic requeuing, use default depth-first
   research_queue.push(self, technology, next_level)
 end
 
@@ -446,6 +660,7 @@ function research_queue.toggle_requeue_multilevel(self)
   self.requeue_multilevel = not self.requeue_multilevel
 end
 
+--- Unresearch a technology and all its descendants.
 --- @param self ResearchQueue
 --- @param technology LuaTechnology
 function research_queue.unresearch(self, technology)
@@ -468,28 +683,61 @@ function research_queue.unresearch(self, technology)
   propagate(technology)
 end
 
+local function assign_next_research(self)
+  head = self.head
+  if head then
+    local node = head.next
+    while node do
+      local state = self.force_table.research_states[node.technology.name]
+      if state == constants.research_state.available then
+        research_queue.move_to_front(self, node.technology, node.level)
+        break
+      end
+      node = node.next
+    end
+  end
+end
+
 --- @param self ResearchQueue
 function research_queue.update_active_research(self)
   local head = self.head
-  if not self.paused and head then
+  local should_research = not self.paused and head
+  
+  if should_research then
+    --- @cast head -nil
     local current_research = self.force.current_research
-    if not current_research or head.technology.name ~= current_research.name then
+    local needs_new_research = not current_research or head.technology.name ~= current_research.name
+    
+    if needs_new_research then
       self.updating_active_research = true
       self.force.add_research(head.technology)
       self.updating_active_research = false
+      
+      -- Update progress tracking
       self.force_table.last_research_progress = flib_technology.get_research_progress(head.technology, head.level)
+      
+      -- Notify players if research requires manual action
       if #head.technology.research_unit_ingredients == 0 then
-        for _, player in pairs(head.technology.force.players) do
-          player.print({ "", "Next Research requires player action: ", head.technology.prototype.localised_name })
-        end
+        -- TODO: Use localization
+        local message = { "", "Next Research requires player action: ", head.technology.prototype.localised_name }
+        head.technology.force.print(message)
+        -- skip validation, so we don't remove descendants
+        research_queue.remove(self, head.technology, head.level, true)
+        -- Try again with the next item in the queue. It might be another trigger tech.
+        research_queue.update_active_research(self)
+        -- Now that all trigger techs are removed, head should be a normal tech or nil
+        -- If there's a normal tech, bubble it behind the next valid and researchable tech.
+        assign_next_research(self)
       end
     end
   else
+    -- Cancel research when paused or queue is empty
     self.updating_active_research = true
     self.force.cancel_current_research()
     self.updating_active_research = false
     self.force_table.last_research_progress = 0
   end
+  
   self.force_table.last_research_progress_tick = game.tick
 end
 

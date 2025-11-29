@@ -1,7 +1,7 @@
 local flib_format = require("__flib__.format")
 local flib_math = require("__flib__.math")
 local flib_table = require("__flib__.table")
-local flib_gui_templates = require("__flib__.gui-templates")
+local flib_gui_templates = require("temp_gui-templates")
 local flib_technology = require("__flib__.technology")
 
 local constants = require("constants")
@@ -42,6 +42,9 @@ function gui_util.effect_button(effect, show_controls)
     sprite = storage.effect_icons[effect.ammo_category]
     tooltip =
     { "modifier-description." .. effect.ammo_category .. "-damage-bonus", tostring(effect.modifier * 100) .. "%" }
+  elseif effect.type == "change-recipe-productivity" then
+    sprite = "recipe/" .. effect.recipe
+    elem_tooltip = { type = "recipe", name = effect.recipe }
   elseif effect.type == "give-item" then
     sprite = "item/" .. effect.item
     elem_tooltip = { type = "item", name = effect.item }
@@ -62,12 +65,21 @@ function gui_util.effect_button(effect, show_controls)
       "modifier-description." .. effect.turret_id .. "-attack-bonus",
       tostring(effect.modifier * 100) .. "%",
     }
+  elseif effect.type == "unlock-quality" then
+    sprite = "quality/" .. effect.quality
+    tooltip = effect.effect_description
   elseif effect.type == "unlock-recipe" then
     sprite = "recipe/" .. effect.recipe
     elem_tooltip = { type = "recipe", name = effect.recipe }
     if show_controls and script.active_mods["RecipeBook"] then
       tooltip = { "gui.urq-tooltip-view-in-recipe-book" }
     end
+  elseif effect.type == "unlock-space-location" then
+    sprite = "space-location/" .. effect.space_location
+    elem_tooltip = { type = "space-location", name = effect.space_location }
+    tooltip = effect.effect_description
+  elseif effect.type == "unlock-space-platforms" then
+    return nil
   else
     sprite = storage.effect_icons[effect.type] or ("utility/" .. string.gsub(effect.type, "%-", "_") .. "_modifier_icon")
     local modifier = effect.modifier
@@ -261,9 +273,6 @@ function gui_util.technology_slot(
       { "gui.urq-tooltip-add-to-queue-front" },
       { "gui.urq-tooltip-remove-from-queue" },
     }
-    if script.active_mods["RecipeBook"] then
-      tooltip[#tooltip + 1] = { "", "\n", { "gui.urq-tooltip-view-in-recipe-book" } }
-    end
     slot.tooltip = tooltip
   end
 
@@ -324,7 +333,7 @@ end
 
 --- @param self Gui
 --- @param elem_table LuaGuiElement
---- @param handler function
+--- @param handler GuiElemHandler
 --- @param technologies LuaTechnology[]
 function gui_util.update_technology_info_sublist(self, elem_table, handler, technologies)
   local selected = self.state.selected or {}

@@ -17,4 +17,10 @@ data:extend({
     setting_type = "runtime-per-user",
     default_value = true,
   },
+  {
+    type = "bool-setting",
+    name = "urq-breadth-first-prerequisites",
+    setting_type = "runtime-per-user",
+    default_value = false,
+  },
 })

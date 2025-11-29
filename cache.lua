@@ -1,7 +1,9 @@
 local dictionary = require("__flib__.dictionary")
+local flib_table = require("__flib__.table")
 
 local constants = require("constants")
 local research_queue = require("research-queue")
+local util = require("util")
 
 --- @class Cache
 local cache = {}
@@ -31,6 +33,9 @@ function cache.build_effect_icons()
       local category = prototype.ammo_category
       if not icons[category] then
         icons[category] = "item/" .. prototype.name
+      end
+      if not icons[category.name] then
+        icons[category.name] = "item/" .. prototype.name
       end
     end
   end
@@ -135,71 +140,7 @@ function cache.build_technologies()
   for i, v in pairs(prototypes.item) do
     l_prototypes[i] = v
   end
-
-  table.sort(technologies, function(tech_a, tech_b)
-    local ingredients_a = tech_a.research_unit_ingredients
-    local ingredients_b = tech_b.research_unit_ingredients
-    local len_a = #ingredients_a
-    local len_b = #ingredients_b
-    -- Always put technologies with zero ingredients at the front
-    if (len_a == 0) ~= (len_b == 0) then
-      return len_a == 0
-    end
-    if #ingredients_a > 0 then
-      -- Compare ingredient order strings
-      -- Check the most expensive packs first, and sort based on the first difference
-      for i = 0, math.min(len_a, len_b) - 1 do
-        local ingredient_a = ingredients_a[len_a - i]
-        local ingredient_b = ingredients_b[len_b - i]
-        local order_a = l_prototypes[ingredient_a.name].order
-        local order_b = l_prototypes[ingredient_b.name].order
-        -- Cheaper pack goes in front
-        if order_a ~= order_b then
-          return order_a < order_b
-        end
-      end
-      -- Sort the technology with fewer ingredients in front
-      if len_a ~= len_b then
-        return len_a < len_b
-      end
-    end
-    -- Compare technology order strings
-    local order_a = tech_a.order
-    local order_b = tech_b.order
-    if order_a ~= order_b then
-      return order_a < order_b
-    end
-    -- Compare prototype names
-    return tech_a.name < tech_b.name
-  end)
-
-  -- Create order lookup and assemble upgrade groups
-  --- @type table<string, LuaTechnologyPrototype[]>
-  local upgrade_groups = {}
-  --- @type table<string, number>
-  local order = {}
-  for i = 1, #technologies do
-    local technology = technologies[i]
-    order[technology.name] = i
-    if technology.upgrade then
-      local base_name = string.match(technology.name, "^(.*)%-%d*$") or technology.name
-      local upgrade_group = upgrade_groups[base_name]
-      if not upgrade_group then
-        upgrade_group = {}
-        upgrade_groups[base_name] = upgrade_group
-      end
-      upgrade_group[#upgrade_group + 1] = technology
-    end
-  end
-  -- Sort upgrade groups
-  for _, group in pairs(upgrade_groups) do
-    table.sort(group, function(a, b)
-      return a.level < b.level
-    end)
-  end
-
-  profiler.stop()
-  log({ "", "Tech Sorting ", profiler })
+  log({ "", "Tech Loaded ", profiler })
 
   profiler.reset()
 
@@ -276,6 +217,220 @@ function cache.build_technologies()
 
   profiler.stop()
   log({ "", "Prerequisite Generation ", profiler })
+
+  profiler.reset()
+
+  local function scienceLevelToFlatOrder(levels)
+    local flat = {}
+    for i = 1, #levels do
+      for _, itemId in ipairs(levels[i].items) do
+        table.insert(flat, itemId)
+      end
+    end
+    return flat
+  end
+
+  local function buildScienceHierarchy(packs)
+    local levels = {}
+    local processed = {}
+
+    -- Track all science pack dependencies (only science packs, not regular techs)
+    local sciencePackDeps = {}
+    for packName, prereqs in pairs(packs) do
+      sciencePackDeps[packName] = {}
+      for _, prereq in ipairs(prereqs) do
+        if packs[prereq] then -- Only include if it's a science pack
+          table.insert(sciencePackDeps[packName], prereq)
+        end
+      end
+    end
+
+    -- Helper to get dependency depth
+    local function getDependencyDepth(packName, depthMap)
+      if depthMap[packName] then return depthMap[packName] end
+
+      local maxDepth = 0
+      for _, dep in ipairs(sciencePackDeps[packName] or {}) do
+        local depDepth = getDependencyDepth(dep, depthMap)
+        maxDepth = math.max(maxDepth, depDepth)
+      end
+
+      depthMap[packName] = maxDepth + 1
+      return depthMap[packName]
+    end
+
+    -- Calculate depths for all science packs
+    local depthMap = {}
+    for packName in pairs(packs) do
+      getDependencyDepth(packName, depthMap)
+    end
+
+    -- Group by depth
+    for packName, depth in pairs(depthMap) do
+      levels[depth] = levels[depth] or {}
+      table.insert(levels[depth], packName)
+    end
+
+    -- Sort levels
+    local sortedLevels = {}
+    for depth = 1, #levels do
+      if levels[depth] then
+        table.sort(levels[depth])
+        table.insert(sortedLevels, levels[depth])
+      end
+    end
+
+    return sortedLevels
+  end
+
+  local function getSciencePackCombinations(items, scienceLevels)
+    local combinations = {}
+    local sciencePackLevels = {}
+
+    -- Create quick lookup for science pack levels
+    for level, packs in pairs(scienceLevels) do
+      for _, pack in ipairs(packs) do
+        sciencePackLevels[pack] = level
+      end
+    end
+
+    -- Find all unique science pack combinations used by items
+    for itemId, item in pairs(items) do
+      -- Extract only science packs from prerequisites
+      local sciencePacks = {}
+      for _, prereq in ipairs(item) do
+        if sciencePackLevels[prereq] then
+          table.insert(sciencePacks, prereq)
+        end
+      end
+
+      -- Create unique key for this combination
+      if #sciencePacks > 0 then
+        table.sort(sciencePacks)
+        local comboKey = table.concat(sciencePacks, "|")
+
+        if not combinations[comboKey] then
+          combinations[comboKey] = {
+            key = comboKey,
+            sciencePacks = sciencePacks,
+            items = {},
+            maxLevel = 0
+          }
+
+          -- Calculate max science level in this combination
+          for _, pack in ipairs(sciencePacks) do
+            combinations[comboKey].maxLevel = math.max(
+              combinations[comboKey].maxLevel,
+              sciencePackLevels[pack]
+            )
+          end
+        end
+
+        table.insert(combinations[comboKey].items, itemId)
+      else
+        local comboKey = "<nil>"
+        if not combinations[comboKey] then
+          combinations[comboKey] = {
+            key = comboKey,
+            sciencePacks = sciencePacks,
+            items = {},
+            maxLevel = 0
+          }
+        end
+        table.insert(combinations[comboKey].items, itemId)
+      end
+    end
+
+    -- CONVERT TO ARRAY
+    local combinationsArray = {}
+    for _, combo in pairs(combinations) do
+      table.sort(combo.items, function(tech_a_name, tech_b_name)
+        local tech_a = prototypes.technology[tech_a_name]
+        local tech_b = prototypes.technology[tech_b_name]
+        -- Always put technologies with the least cost at the front
+        local cost_a = tech_a.research_unit_count
+        if tech_a.research_unit_energy == 0 and tech_a.research_trigger.count ~= nil then
+          cost_a = tech_a.research_trigger.count
+        end
+        local cost_b = tech_b.research_unit_count
+        if tech_b.research_unit_energy == 0 and tech_b.research_trigger.count ~= nil then
+          cost_b = tech_b.research_trigger.count
+        end
+        if cost_a ~= cost_b then
+          return cost_a < cost_b
+        end
+        -- Compare prototype names
+        return tech_a.name < tech_b.name
+      end)
+      table.insert(combinationsArray, combo)
+    end
+
+    table.sort(combinationsArray, function(a, b)
+      if a.maxLevel ~= b.maxLevel then
+        return a.maxLevel < b.maxLevel
+      end
+      if #a.sciencePacks ~= #b.sciencePacks then
+        return #a.sciencePacks < #b.sciencePacks
+      end
+      return a.key < b.key
+    end)
+
+    return combinationsArray
+  end
+
+  -- Build a list of all the techs with their prerequisites
+  local allTechs = {}
+  for _, basetech in pairs(base_techs) do
+    allTechs[basetech.name] = {}
+  end
+  allTechs = flib_table.deep_merge({ allTechs, prerequisites })
+
+  -- Build a list of all the Science Pack items
+  local scienceTechNames = {}
+  local scienceTechs = {}
+  for _, itm in pairs(prototypes.entity) do
+    if itm.type == "lab" then
+      scienceTechNames = util.tableMergeUnique(scienceTechNames, itm.lab_inputs)
+    end
+  end
+  for _, name in pairs(scienceTechNames) do
+    scienceTechs[name] = allTechs[name]
+  end
+
+  local scienceLevels = buildScienceHierarchy(scienceTechs)
+  local combinations = getSciencePackCombinations(allTechs, scienceLevels)
+  allTechs = scienceLevelToFlatOrder(combinations)
+
+  -- Create order lookup and assemble upgrade groups
+  --- @type table<string, LuaTechnologyPrototype[]>
+  local upgrade_groups = {}
+  --- @type table<string, number>
+  local order = {}
+  for i = #allTechs, 1, -1 do
+    local name = allTechs[i]
+    order[name] = i
+  end
+  for i = 1, #technologies do
+    local technology = technologies[i]
+    if technology.upgrade then
+      local base_name = string.match(technology.name, "^(.*)%-%d*$") or technology.name
+      local upgrade_group = upgrade_groups[base_name]
+      if not upgrade_group then
+        upgrade_group = {}
+        upgrade_groups[base_name] = upgrade_group
+      end
+      upgrade_group[#upgrade_group + 1] = technology
+    end
+  end
+  -- Sort upgrade groups
+  for _, group in pairs(upgrade_groups) do
+    table.sort(group, function(a, b)
+      return a.level < b.level
+    end)
+  end
+
+  profiler.stop()
+  log({ "", "Tech Sorting ", profiler })
 
   storage.num_technologies = #technologies
   storage.technology_order = order

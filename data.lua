@@ -35,7 +35,7 @@ data:extend({
   {
     type = "sprite",
     name = "urq_open_in_graph",
-    filename = "__UltimateResearchQueue2__/graphics/graph.png",
+    filename = "__heroic-research-queue__/graphics/graph.png",
     size = 32,
     mipmap_count = 2,
     flags = { "gui-icon" },
