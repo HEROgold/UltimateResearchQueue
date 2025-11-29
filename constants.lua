@@ -81,7 +81,8 @@ constants.overlay_constant = {
   ["zoom-to-world-upgrade-planner-enabled"] = "utility/zoom_to_world_upgrade_planner_enabled_modifier_constant",
 }
 
-constants.queue_limit = 7 * 7
+-- rows * items (width)
+constants.queue_limit = 150 * 7
 
 --- @enum ResearchState
 constants.research_state = {

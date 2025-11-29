@@ -1,4 +1,4 @@
-[![shield](https://img.shields.io/badge/dynamic/json?color=orange&label=Factorio&query=downloads_count&suffix=%20downloads&url=https%3A%2F%2Fmods.factorio.com%2Fapi%2Fmods%2FUltimateResearchQueue2)](https://mods.factorio.com/mod/UltimateResearchQueue2)
+[![shield](https://img.shields.io/badge/dynamic/json?color=orange&label=Factorio&query=downloads_count&suffix=%20downloads&url=https%3A%2F%2Fmods.factorio.com%2Fapi%2Fmods%2Fheroic-research-queue)](https://mods.factorio.com/mod/heroic-research-queue)
 
 # Ultimate Research Queue for 2.x
 
@@ -9,7 +9,7 @@ infinite technologies.
 ## Installation
 
 Download and install from the [official Factorio mod
-portal](https://mods.factorio.com/mod/UltimateResearchQueue2).
+portal](https://mods.factorio.com/mod/heroic-research-queue).
 
 ## Contributing
 

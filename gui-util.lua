@@ -333,7 +333,7 @@ end
 
 --- @param self Gui
 --- @param elem_table LuaGuiElement
---- @param handler function
+--- @param handler GuiElemHandler
 --- @param technologies LuaTechnology[]
 function gui_util.update_technology_info_sublist(self, elem_table, handler, technologies)
   local selected = self.state.selected or {}
