@@ -647,7 +647,7 @@ function gui.update_tech_info(self)
       tooltip = show_controls and script.active_mods["RecipeBook"] and { "gui.urq-tooltip-view-in-recipe-book" },
       handler = { [defines.events.on_gui_click] = gui.open_in_recipe_book },
     }
-    if number > 0 then ingredient["number"] = number end
+    if number and number > 0 then ingredient["number"] = number end
     flib_gui.add(ingredients_table, ingredient)
     self.elems.tech_info_ingredients_count_label.caption = ""
   end

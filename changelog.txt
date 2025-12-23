@@ -1,8 +1,8 @@
 ---------------------------------------------------------------------------------------------------
 Version: 2.0.9
-Date: xxx
+Date: 2025-12-15
   Changes:
-    - xxx
+    - Fixed: bug with send to orbit research trigger technology not loading info (#27) - Thanks Minecrafter8001
 ---------------------------------------------------------------------------------------------------
 Version: 2.0.8
 Date: 2025-12-04
