@@ -510,6 +510,11 @@ function research_queue.push(self, technology, level, player_index)
   util.schedule_force_update(self.force)
 end
 
+--- @param technology LuaTechnology
+function is_trigger_research(technology)
+  return technology.prototype.research_trigger ~= nil
+end
+
 --- Add a technology and its prerequisites to the front of the queue, moving prerequisites if required.
 --- @param self ResearchQueue
 --- @param technology LuaTechnology

@@ -86,6 +86,9 @@ function temp_flib_gui_templates.technology_slot(parent, technology, level, rese
     end
   elseif researchTrigger ~= nil then
     local name = nil
+    if researchTrigger.item == nil then
+      researchTrigger.item = { name = "automation-science-pack" }
+    end
     if researchTrigger.type == "mine-entity" then
       name = "entity/" .. researchTrigger.entity
     elseif researchTrigger.type == "build-entity" then
