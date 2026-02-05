@@ -54,7 +54,7 @@ function cache.build_effect_icons()
   end
 
   for _, prototype in
-  pairs(prototypes.get_equipment_filtered({ { filter = "type", type = "active-defense-equipment" } }))
+    pairs(prototypes.get_equipment_filtered({ { filter = "type", type = "active-defense-equipment" } }))
   do
     local attack_parameters = prototype.attack_parameters --[[@as AttackParameters]]
     for _, category in pairs(attack_parameters.ammo_categories or { attack_parameters.ammo_type.category }) do
@@ -275,7 +275,9 @@ function cache.build_technologies()
 
     -- Helper to get dependency depth
     local function getDependencyDepth(packName, depthMap)
-      if depthMap[packName] then return depthMap[packName] end
+      if depthMap[packName] then
+        return depthMap[packName]
+      end
 
       local maxDepth = 0
       for _, dep in ipairs(sciencePackDeps[packName] or {}) do
@@ -342,15 +344,12 @@ function cache.build_technologies()
             key = comboKey,
             sciencePacks = sciencePacks,
             items = {},
-            maxLevel = 0
+            maxLevel = 0,
           }
 
           -- Calculate max science level in this combination
           for _, pack in ipairs(sciencePacks) do
-            combinations[comboKey].maxLevel = math.max(
-              combinations[comboKey].maxLevel,
-              sciencePackLevels[pack]
-            )
+            combinations[comboKey].maxLevel = math.max(combinations[comboKey].maxLevel, sciencePackLevels[pack])
           end
         end
 
@@ -362,7 +361,7 @@ function cache.build_technologies()
             key = comboKey,
             sciencePacks = sciencePacks,
             items = {},
-            maxLevel = 0
+            maxLevel = 0,
           }
         end
         table.insert(combinations[comboKey].items, itemId)

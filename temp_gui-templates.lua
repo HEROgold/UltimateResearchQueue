@@ -36,13 +36,13 @@ function temp_flib_gui_templates.technology_slot(parent, technology, level, rese
     base.tags = flib_gui.format_handlers({ [defines.events.on_gui_click] = on_click }, tags)
   end
   base
-      .add({ type = "flow", name = "icon_flow", style = "flib_technology_slot_sprite_flow", ignored_by_interaction = true })
-      .add({
-        type = "sprite",
-        name = "icon",
-        style = "flib_technology_slot_sprite",
-        sprite = "technology/" .. technology.name,
-      })
+    .add({ type = "flow", name = "icon_flow", style = "flib_technology_slot_sprite_flow", ignored_by_interaction = true })
+    .add({
+      type = "sprite",
+      name = "icon",
+      style = "flib_technology_slot_sprite",
+      sprite = "technology/" .. technology.name,
+    })
 
   if technology.upgrade or is_multilevel or technology_prototype.level > 1 then
     base.add({
@@ -99,7 +99,9 @@ function temp_flib_gui_templates.technology_slot(parent, technology, level, rese
       name = "item/" .. researchTrigger.item.name
     elseif researchTrigger.type == "craft-fluid" or researchTrigger.type == "craft-fluids" then
       name = "fluid/" .. researchTrigger.fluid
-    elseif researchTrigger.type == "create-space-platform" or researchTrigger.type == "create-space-platform-specific" then
+    elseif
+      researchTrigger.type == "create-space-platform" or researchTrigger.type == "create-space-platform-specific"
+    then
       name = "technology/" .. technology.name
     elseif researchTrigger.type == "send-item-to-orbit" then
       name = "item/" .. researchTrigger.item.name
