@@ -76,7 +76,7 @@ function util.tableMergeUnique(...)
   local result = {}
   local seen = {}
 
-  for i = 1, select('#', ...) do
+  for i = 1, select("#", ...) do
     local t = select(i, ...)
     if type(t) == "table" then
       for _, v in ipairs(t) do
