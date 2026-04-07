@@ -194,6 +194,84 @@ function research_queue.instant_research(self, technology)
   technology.researched = true
 end
 
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+--- @return ResearchQueueNode?, ResearchQueueNode?
+local function find_node(self, technology, level)
+  local node, prev = self.head, nil
+  while node and (node.technology ~= technology or node.level ~= level) do
+    prev = node
+    node = node.next
+  end
+  return node, prev
+end
+
+--- @param self ResearchQueue
+--- @param node ResearchQueueNode
+--- @return uint
+local function get_index(self, node)
+  local index = 1
+  local iter = self.head
+  while iter and iter ~= node do
+    index = index + 1
+    iter = iter.next
+  end
+  return index
+end
+
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
+--- @param level uint
+--- @param index uint
+function research_queue.move_to_index(self, technology, level, index)
+  local node, prev = find_node(self, technology, level)
+  if not node then
+    return
+  end
+
+  if index < 1 then
+    index = 1
+  elseif index > self.len then
+    index = self.len
+  end
+
+  local source_index = get_index(self, node)
+  if source_index == index then
+    return
+  end
+
+  -- Remove node from current position
+  if node == self.head then
+    self.head = node.next
+  else
+    prev.next = node.next
+  end
+
+  -- Adjust index after removal if the node was before the destination
+  if source_index < index then
+    index = index - 1
+  end
+
+  node.next = nil
+  if index == 1 then
+    node.next = self.head
+    self.head = node
+  else
+    local insert_after = self.head
+    for _ = 2, index do
+      if not insert_after.next then
+        break
+      end
+      insert_after = insert_after.next
+    end
+    node.next = insert_after.next
+    insert_after.next = node
+  end
+
+  util.schedule_force_update(self.force)
+end
+
 --- This does not account for prerequisites
 --- @param self ResearchQueue
 --- @param technology LuaTechnology

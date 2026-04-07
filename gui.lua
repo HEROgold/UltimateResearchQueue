@@ -174,6 +174,7 @@ function gui.new(player)
       research_state_counts = {},
       search_open = false,
       search_query = "",
+      dragging = nil,
       --- @type TechnologyAndLevel?
       selected = nil,
     },
@@ -199,6 +200,23 @@ end
 --- @param e EventData.on_gui_click
 function gui.on_tech_slot_click(self, e)
   local tags = e.element.tags
+  if self.state.dragging then
+    if tags and tags.queue_index then
+      local drag = self.state.dragging
+      local target_index = tags.queue_index
+      if drag.source_index ~= target_index then
+        if drag.source_index < target_index then
+          target_index = target_index - 1
+        end
+        research_queue.move_to_index(self.force_table.queue, drag.technology, drag.level, target_index)
+      end
+      self.state.dragging = nil
+      util.schedule_force_update(self.force)
+      return
+    end
+    self.state.dragging = nil
+  end
+
   local tech_name, level =
       tags.tech_name, --[[@as string]]
       tags.level --[[@as uint]]
@@ -213,6 +231,25 @@ function gui.on_tech_slot_click(self, e)
     return
   end
   gui.select_technology(self, technology, level)
+end
+
+--- @param self Gui
+--- @param e EventData.on_gui_click
+function gui.on_queue_drag_handle_click(self, e)
+  local tags = e.element.tags
+  if not tags then
+    return
+  end
+  local technology = self.force.technologies[tags.tech_name]
+  if not technology then
+    return
+  end
+  self.state.dragging = {
+    technology = technology,
+    level = tags.level,
+    source_index = tags.queue_index,
+  }
+  util.schedule_force_update(self.force)
 end
 
 --- @param self Gui
@@ -493,6 +530,9 @@ function gui.update_queue(self)
     local is_selected = selected.technology == technology and selected.level == level
     if button then
       gui_util.move_to(button, queue_table, i)
+      local tags = button.tags or {}
+      tags.queue_index = i
+      button.tags = tags
       gui_util.update_technology_slot(
         button,
         technology,
@@ -511,6 +551,8 @@ function gui.update_queue(self)
         gui.on_tech_slot_click,
         is_selected,
         flib_technology.get_leveled_name(technology, level),
+        i,
+        gui.on_queue_drag_handle_click,
         i
       )
     end

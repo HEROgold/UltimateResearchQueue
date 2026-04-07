@@ -236,6 +236,8 @@ end
 --- @param is_selected boolean?
 --- @param name string?
 --- @param index uint?
+--- @param on_drag_click GuiElemHandler?
+--- @param drag_index uint?
 --- @return LuaGuiElement
 function gui_util.technology_slot(
     parent,
@@ -246,7 +248,9 @@ function gui_util.technology_slot(
     on_click,
     is_selected,
     name,
-    index
+    index,
+    on_drag_click,
+    drag_index
 )
   local slot = flib_gui_templates.technology_slot(parent, technology, level, research_state, on_click, {
     cost = flib_technology.get_research_unit_count(technology, level),
@@ -255,6 +259,11 @@ function gui_util.technology_slot(
     tech_name = technology.name,
   }, index)
   slot.name = name or technology.name
+  if drag_index then
+    local tags = slot.tags or {}
+    tags.queue_index = drag_index
+    slot.tags = tags
+  end
   slot.add({
     type = "label",
     name = "duration_label",
@@ -263,6 +272,21 @@ function gui_util.technology_slot(
   })
   if is_selected then
     slot.toggled = is_selected
+  end
+  if on_drag_click and drag_index then
+    slot.add({
+      type = "sprite-button",
+      name = "drag_handle",
+      style = "transparent_slot",
+      sprite = "utility/drag-handle",
+      tooltip = "Drag to reorder",
+      tags = {
+        tech_name = technology.name,
+        level = level,
+        queue_index = drag_index,
+      },
+      handler = { [defines.events.on_gui_click] = on_drag_click },
+    })
   end
   if show_controls then
     --- @type LocalisedString
