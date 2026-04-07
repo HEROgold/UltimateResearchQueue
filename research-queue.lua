@@ -96,6 +96,12 @@ end
 
 --- @param self ResearchQueue
 --- @param technology LuaTechnology
+local function is_trigger_research(technology)
+  return technology.prototype.research_trigger ~= nil
+end
+
+--- @param self ResearchQueue
+--- @param technology LuaTechnology
 --- @return ResearchState | nil
 function get_satisfaction_state(self, technology)
   -- Check prerequisites once and determine state based on results
@@ -213,8 +219,15 @@ end
 --- @return LocalisedString?
 function research_queue.instant_research(self, technology)
   local research_state = self.force_table.research_states[technology.name]
-  if research_state == constants.research_state.researched then return { "message.urq-already-researched" } end
-  if research_state == constants.research_state.available then technology.researched = true; return end
+  if research_state == constants.research_state.researched then
+    return { "message.urq-already-researched" }
+  elseif is_trigger_research(technology) then
+    return { "message.urq-unable-to-queue" }
+  end
+  if research_state == constants.research_state.available then
+    technology.researched = true
+    return
+  end
 
   -- Research prerequisites and then this technology
   local prerequisites = storage.technology_prerequisites[technology.name] or {}
@@ -329,6 +342,7 @@ local function add_technology(to_research, technology, level, queue)
   end
 end
 
+
 -- Mark all prerequisites to to_research using depth-first traversal (original approach), marking already queued techs to to_move
 --- @param self ResearchQueue
 --- @param to_research TechnologyAndLevel[]
@@ -364,73 +378,40 @@ local function add_prerequisites_depth_first(self, to_research, technology, to_m
   end
 end
 
--- Mark all prerequisites to to_research using breadth-first traversal, marking already queued techs to to_move
+
+-- Mark all prerequisites to to_research using depth-first traversal (original approach), marking already queued techs to to_move
 --- @param self ResearchQueue
 --- @param to_research TechnologyAndLevel[]
 --- @param technology LuaTechnology
 --- @param to_move TechnologyAndLevel[]
 --- @return LocalisedString?
-local function add_prerequisites_breadth_first(self, to_research, technology, to_move)
-  local technologies = self.force.technologies
-  local visited = {}
-  local queue = {technology}
-  local levels = {} -- Track the depth level of each technology for breadth-first ordering
-  levels[technology.name] = 0
-  local max_level = 0
-  
-  -- Breadth-first traversal of prerequisite tree
-  while #queue > 0 do
-    local current = table.remove(queue, 1) -- Remove from front (queue behavior)
-    local current_level = levels[current.name]
-    
-    -- Process immediate prerequisites of current technology
-    for _, prerequisite in pairs(current.prerequisites) do
-      if not visited[prerequisite.name] then
-        visited[prerequisite.name] = true
-        local prerequisite_level = current_level + 1
-        levels[prerequisite.name] = prerequisite_level
-        max_level = math.max(max_level, prerequisite_level)
-        
-        local prerequisite_research_state = self.force_table.research_states[prerequisite.name]
-        if prerequisite_research_state == constants.research_state.disabled then
-          return { "message.urq-has-disabled-prerequisites" }
-        end
-        
-        -- Add to queue for further processing if not researched
-        if prerequisite_research_state ~= constants.research_state.researched then
-          table.insert(queue, prerequisite)
-        end
-      end
-    end
+function research_queue.push(self, technology, level)
+  local research_state = self.force_table.research_states[technology.name]
+  if research_state == constants.research_state.researched then
+    return { "message.urq-already-researched" }
+  elseif research_state == constants.research_state.disabled then
+    return { "message.urq-tech-is-disabled" }
+  elseif research_queue.contains(self, technology, level) then
+    return { "message.urq-already-in-queue" }
   end
-  
-  -- Sort prerequisites by level (breadth-first order) and add them
-  local prerequisites_by_level = {}
-  for tech_name, level in pairs(levels) do
-    if tech_name ~= technology.name then -- Exclude the original technology
-      if not prerequisites_by_level[level] then
-        prerequisites_by_level[level] = {}
+  --- @type TechnologyAndLevel[]
+  local to_research = {}
+  if research_state == constants.research_state.not_available then
+    -- Add all prerequisites to research this technology ASAP
+    local technologies = self.force.technologies
+    local technology_prerequisites = storage.technology_prerequisites[technology.name] or {}
+    for i = 1, #technology_prerequisites do
+      local prerequisite_name = technology_prerequisites[i]
+      local prerequisite = technologies[prerequisite_name]
+      local prerequisite_research_state = self.force_table.research_states[prerequisite_name]
+      if prerequisite_research_state == constants.research_state.disabled then
+        return { "message.urq-has-disabled-prerequisites" }
       end
-      table.insert(prerequisites_by_level[level], tech_name)
-    end
-  end
-  
-  -- Add prerequisites level by level, starting from the deepest (highest level) and working backwards
-  -- This ensures dependencies are added in the correct order for the queue
-  for level = max_level, 1, -1 do
-    local tech_names = prerequisites_by_level[level]
-    if tech_names then
-      for _, prerequisite_name in pairs(tech_names) do
-        local prerequisite = technologies[prerequisite_name]
-        local prerequisite_research_state = self.force_table.research_states[prerequisite_name]
-        
-        if prerequisite_research_state ~= constants.research_state.researched then
-          if not research_queue.contains(self, prerequisite, true) then
-            add_technology(to_research, prerequisite)
-          else
-            add_technology(to_move, prerequisite)
-          end
-        end
+      if
+          not research_queue.contains(self, prerequisite, true)
+          and prerequisite_research_state ~= constants.research_state.researched
+      then
+        add_technology(to_research, prerequisite)
       end
     end
   end
@@ -564,7 +545,11 @@ function research_queue.push_front(self, technology, level, player_index)
     local highest = research_queue.get_highest_level(self, technology)
     add_technology(to_move, technology, highest)
   end
-  add_technology(to_research, technology, level, self)
+  if research_queue.contains(self, technology, true) then
+    add_technology(to_move, technology)
+  else
+    add_technology(to_research, technology, level, self)
+  end
 
   check_for_errors(self, to_research)
 
@@ -715,6 +700,7 @@ function research_queue.update_active_research(self)
     
     if needs_new_research then
       self.updating_active_research = true
+      self.force.cancel_current_research()
       self.force.add_research(head.technology)
       self.updating_active_research = false
       
@@ -723,16 +709,23 @@ function research_queue.update_active_research(self)
       
       -- Notify players if research requires manual action
       if #head.technology.research_unit_ingredients == 0 then
-        -- TODO: Use localization
-        local message = { "", "Next Research requires player action: ", head.technology.prototype.localised_name }
-        head.technology.force.print(message)
-        -- skip validation, so we don't remove descendants
-        research_queue.remove(self, head.technology, head.level, true)
-        -- Try again with the next item in the queue. It might be another trigger tech.
-        research_queue.update_active_research(self)
-        -- Now that all trigger techs are removed, head should be a normal tech or nil
-        -- If there's a normal tech, bubble it behind the next valid and researchable tech.
-        assign_next_research(self)
+        head.technology.force.print({ "", { "message.urq-requires-player-action" }, head.technology.prototype.localised_name })
+
+        -- find next possible technology and move to the front of the queue
+        local next_research = head
+        while next_research ~= nil and (is_trigger_research(next_research.technology) or are_prereqs_satisfied(next_research.technology) == false) do
+          next_research = next_research.next
+        end
+        if next_research ~= nil and next_research ~= head then
+          self.updating_active_research = true
+          research_queue.move_to_front(self, next_research.technology, next_research.level)
+          self.force.add_research(next_research.technology)
+          self.updating_active_research = false
+          self.force_table.last_research_progress = flib_technology.get_research_progress(head.technology, head.level)
+          for _, player in pairs(head.technology.force.players) do
+            player.print({ "", { "message.urq-moved-to-front" }, next_research.technology.prototype.localised_name })
+          end
+        end
       end
     end
   else

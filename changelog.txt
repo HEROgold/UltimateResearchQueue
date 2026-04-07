@@ -1,4 +1,31 @@
 ---------------------------------------------------------------------------------------------------
+Version: 2.0.9
+Date: 2025-12-15
+  Changes:
+    - Fixed: bug with send to orbit research trigger technology not loading info (#27) - Thanks Minecrafter8001
+---------------------------------------------------------------------------------------------------
+Version: 2.0.8
+Date: 2025-12-04
+  Changes:
+    - Fixed: bug with scripted research trigger technology not loading info (#24)
+---------------------------------------------------------------------------------------------------
+Version: 2.0.7
+Date: 2025-12-03
+  Changes:
+    - Fixed: bug with fluid technology not loading info (#22)
+---------------------------------------------------------------------------------------------------
+Version: 2.0.6
+Date: 2025-11-30
+  Changes:
+    - Improvement: allow prioritising of technologies already in the queue (shift+dbl click)
+    - Fixed: trigger research message not displaying (within 60 seconds of last message)
+---------------------------------------------------------------------------------------------------
+Version: 2.0.5
+Date: 2025-11-30
+  Changes:
+    - Fixed: trigger technologies icon for craft_fluid trigger
+    - Improvement/Fixed: considerably improved cached technology data calculations - fixes recursion with Py Streamline mod
+---------------------------------------------------------------------------------------------------
 Version: 2.0.4
 Date: 2025-11-29
   Changes:
